@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Image files to Zarr in the browser (phkv)</title>
+<meta name="description" content="Paste the URL of a remote image file or store, such as an OME-TIFF, a Zeiss CZI, a DICOM, an N5 or a Sentinel-2 SAFE product: a service worker zarrifies it into a phkv store in the browser and serves it as plain Zarr, opened here in Neuroglancer or on a map. The phkv variant of the refkv demo: one file, whose keys a perfect hash finds in one hop.">
+<style>
+  :root {
+    --bg: #fafaf8; --fg: #1d1d1b; --muted: #6b6b66; --line: #deddd8;
+    --panel: #ffffff; --accent: #2d5bd7; --error: #b3261e;
+    --py-comment: #6b6b66; --py-string: #1a7f37; --py-keyword: #8250df; --py-builtin: #0550ae; --py-number: #953800;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #141413; --fg: #ecebe6; --muted: #9b9a94; --line: #34332f;
+      --panel: #1d1d1b; --accent: #8aa8ff; --error: #f2b8b5;
+      --py-comment: #9b9a94; --py-string: #7ee787; --py-keyword: #d2a8ff; --py-builtin: #79c0ff; --py-number: #ffa657; }
+  }
+  body { background: var(--bg); color: var(--fg); margin: 0; line-height: 1.5; }
+  main { max-width: 860px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; }
+  p.lede { color: var(--muted); margin: 0 0 20px; }
+  h2.part { font-size: 1.05rem; margin: 32px 0 4px; }
+  p.about { color: var(--muted); font-size: 0.9rem; margin: 0; }
+  form { display: flex; gap: 8px; flex-wrap: wrap; }
+  select { font: inherit; padding: 2px 4px; border: 1px solid var(--line); border-radius: 4px; background: var(--panel); color: var(--fg); }
+  input { flex: 1 1 420px; min-width: 0; padding: 8px 10px; font: inherit; font-size: 0.9rem;
+    border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--fg); }
+  button, a.button { padding: 8px 14px; font: inherit; border-radius: 6px; border: 1px solid var(--accent);
+    background: var(--accent); color: var(--bg); cursor: pointer; text-decoration: none; display: inline-block; }
+  a.button.secondary { background: transparent; color: var(--accent); }
+  #status { margin: 16px 0; color: var(--muted); min-height: 1.5em; }
+  #status.error { color: var(--error); border: 1px solid var(--error); border-radius: 8px; padding: 12px 16px; }
+  #status.error p { margin: 6px 0 0; color: var(--fg); }
+  #status.error p.help { color: var(--muted); }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px; margin-top: 16px; }
+  code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.85rem; word-break: break-all; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.9rem; margin: 8px 0 16px; }
+  th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 500; }
+  td:last-child { overflow-wrap: anywhere; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .examples { font-size: 0.9rem; color: var(--muted); margin: 12px 0 0; padding: 0; list-style: none;
+    display: grid; grid-template-columns: max-content 1fr; gap: 8px 12px; }
+  .examples dt { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+  .examples dd { margin: 0; }
+  .examples dd a { color: var(--accent); display: block; padding: 1px 0; }
+  .examples a.spec { color: var(--muted); font-size: 0.8rem; }
+  /* a format's name, on its own color (each dark enough for white text in either theme) */
+  .fmt { display: inline-block; min-width: 6.6em; box-sizing: border-box; text-align: center; padding: 1px 7px; border-radius: 4px;
+    background: var(--fmt); color: #fff; font: 600 0.75rem/1.5 ui-monospace, "SF Mono", Menlo, monospace;
+    letter-spacing: 0.02em; }
+  @media (max-width: 560px) {
+    .examples { grid-template-columns: 1fr; gap: 2px 12px; } .examples dd { margin-bottom: 8px; }
+    table { font-size: 0.8rem; } th, td { padding: 4px; }
+  }
+  [hidden] { display: none !important; }
+  .table { overflow-x: auto; }
+  #view-row { margin: 4px 0; }
+  #view-note { color: var(--muted); }
+  p.share { color: var(--muted); font-size: 0.9rem; margin: 12px 0 0; }
+  #python h2 { font-size: 1rem; margin: 0 0 4px; }
+  #python p { color: var(--muted); font-size: 0.9rem; margin: 0 0 8px; }
+  #python p a { color: var(--accent); }
+  #python pre { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 12px;
+    overflow-x: auto; margin: 0 0 8px; }
+  #python pre code { word-break: normal; white-space: pre; }
+  /* the Python script's colors, from highlight.js's classes */
+  .hljs-comment, .hljs-meta { color: var(--py-comment); font-style: italic; }
+  .hljs-string { color: var(--py-string); }
+  .hljs-keyword, .hljs-literal { color: var(--py-keyword); }
+  .hljs-built_in { color: var(--py-builtin); }
+  .hljs-number { color: var(--py-number); }
+  button.secondary { background: transparent; color: var(--accent); }
+  footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--line); font-size: 0.9rem; color: var(--muted); }
+  footer a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Image files to Zarr in the browser, with phkv</h1>
+  <p class="lede">Paste the URL of an image file, a Zarr or N5 store, a .vzip archive or a .phkv store. Your browser
+    reads its structure, presents it as Zarr without copying its data, and opens it in Neuroglancer
+    (or, for a Sentinel-2 product, on a map).</p>
+  <form id="form">
+    <input id="url" type="url" required aria-label="image file or refkv URL"
+      placeholder="https://… an image file, a Zarr or N5 store, a .vzip archive or a .phkv store">
+    <button type="submit">Zarrify</button>
+  </form>
+  <div id="status" role="status"></div>
+  <section id="result" hidden>
+    <div><strong id="name"></strong></div>
+    <div id="view-row" hidden><label>Show <select id="view" aria-label="what to show"></select></label></div>
+    <div id="view-note"></div>
+    <div>Neuroglancer source: <code id="zarr-url"></code></div>
+    <div class="table"><table><thead><tr><th>array</th><th>shape</th><th>chunk</th><th>data type</th><th>codecs</th></tr></thead>
+      <tbody id="levels"></tbody></table></div>
+    <div class="actions">
+      <a class="button" id="open-ng" target="_blank" rel="noopener">Open in Neuroglancer</a>
+      <a class="button" id="open-map" target="_blank" rel="noopener" hidden>View on a map</a>
+      <a class="button secondary" id="download">Download .phkv</a>
+    </div>
+    <p class="share" id="share-local">This Neuroglancer link opens only on this site, in a browser where this page
+      has zarrified the file: the page's service worker answers its reads. The store it keeps is a
+      <a href="https://github.com/d-v-b/refkv/blob/main/spec/bindings/phkv.md">phkv</a> store (a draft
+      format): download the .phkv and open its URL here, from a server that allows cross-origin reads (CORS), or read
+      it with refkv's Rust crate. The Neuroglancer fork and refkv's Python package read vzip archives, not phkv stores
+      yet, so there is no link to share. The store refers to the original's bytes by URL, so it stays small, and pins
+      each source's size.</p>
+    <p class="share" id="share-archive" hidden>This Neuroglancer link names the archive itself
+      (<code>&lt;archive url&gt;|vzip:&lt;path&gt;|zarr3:</code>): share it, and any deployment of the Neuroglancer
+      fork opens it, with no service worker.</p>
+  </section>
+  <section id="python" hidden>
+    <h2>In Python</h2>
+    <p>This script builds the same Zarr hierarchy with refkv and opens it with zarr-python. Its header
+      declares its dependencies (<a href="https://peps.python.org/pep-0723/">PEP 723</a>), so
+      <code id="python-run"></code> runs it, with <a href="https://docs.astral.sh/uv/">uv</a>.</p>
+    <pre><code id="python-code"></code></pre>
+    <div class="actions">
+      <button type="button" class="secondary" id="python-copy">Copy</button>
+      <a class="button secondary" id="python-save">Download script</a>
+    </div>
+  </section>
+  <h2 class="part">Or try an example</h2>
+  <!-- The blocks between `profiles:` markers are filled by js/build.mjs from the profile registry
+       (spec/zarrify/profiles/) and each format's demo/examples/<format>.html, with its
+       examples' sources and licenses. -->
+  <dl class="examples" aria-label="examples, by format">
+    <!-- source: IDR idr0011 (CC BY 4.0); BioImage Archive S-BIAD3625 (CC0). -->
+    <dt><span class="fmt" style="--fmt: #1d7350">CZI</span> <a class="spec" href="https://github.com/d-v-b/refkv/blob/main/spec/zarrify/czi.md" title="how refkv zarrifies CZI">spec</a></dt>
+    <dd><a href="#" id="example-czi" data-url="https://ftp.ebi.ac.uk/pub/databases/IDR/idr0011-ledesmafernandez-dad4/20150826-peter_thorpe/Stinger%20plates-extra%20images%20screen%20T34%20x%20TS-more%20repeats/Plate1-Blue-A_TS-Stinger/Plate1-Blue-A-02-Scene-1-P2-E1-01.czi">IDR idr0011, yeast 3-channel z-stack (Zeiss, 44 MB)</a>
+      <a href="#" id="example-czi-pyramid" data-url="https://ftp.ebi.ac.uk/biostudies/fire/S-BIAD/625/S-BIAD3625/Files/Elena_Kratz_atherosclerosis/ID4.czi">S-BIAD3625, atherosclerotic plaque slide (Zeiss, JPEG XR pyramid, 1.0 GB)</a></dd>
+    <!-- source: Prostate-MRI-US-Biopsy, via the NCI Imaging Data Commons (CC BY 4.0; TCIA, doi:10.7937/TCIA.2020.A61IOC1A). -->
+    <dt><span class="fmt" style="--fmt: #a12f66">DICOM</span> <a class="spec" href="https://github.com/d-v-b/refkv/blob/main/spec/zarrify/dicom.md" title="how refkv zarrifies DICOM">spec</a></dt>
+    <dd><a href="#" id="example-dicom" data-url="https://idc-open-data.s3.amazonaws.com/d8d93a71-dfc8-43da-90ca-11e9aaf45cfe/8afac71d-a7c8-4ca4-b4c0-2e0261dfa384.dcm">IDC Prostate-MRI-US-Biopsy, 3-D ultrasound (27 MB)</a></dd>
+    <!-- source: astropy's test data (BSD-3-Clause), https://github.com/astropy/astropy: a WFPC2 multi-extension file and a RICE tile-compressed image. -->
+    <dt><span class="fmt" style="--fmt: #8a4f1d">FITS</span> <a class="spec" href="https://github.com/d-v-b/refkv/blob/main/spec/zarrify/fits.md" title="how refkv zarrifies FITS">spec</a></dt>
+    <dd><a href="#" id="example-fits" data-url="https://raw.githubusercontent.com/astropy/astropy/7d7cf6d2d3e8b1e381e980278d071067b4b25241/astropy/io/fits/tests/data/test0.fits">astropy test0.fits, WFPC2 chips as four SCI extensions (58 KB)</a>
+      <a href="#" id="example-fits-rice" data-url="https://raw.githubusercontent.com/astropy/astropy/7d7cf6d2d3e8b1e381e980278d071067b4b25241/astropy/io/fits/tests/data/comp.fits">astropy comp.fits, a RICE tile-compressed image (86 KB)</a></dd>
+    <!-- source: the IETF CELLAR working group's FLAC decoder testbench (CC0), https://github.com/ietf-wg-cellar/flac-test-files: "57 - PNG PICTURE", 16-bit stereo music with a 960 x 540 PNG front cover, pinned to a commit. -->
+    <dt><span class="fmt" style="--fmt: #5a4a9c">FLAC</span> <a class="spec" href="https://github.com/d-v-b/refkv/blob/main/spec/zarrify/flac.md" title="how refkv zarrifies FLAC">spec</a></dt>
+    <dd><a href="#" id="example-flac" data-url="https://raw.githubusercontent.com/ietf-wg-cellar/flac-test-files/aa7b0c6cf32994c106ae517a08134c28a96ff5b2/subset/57%20-%20PNG%20PICTURE.flac">IETF FLAC test files, 16-bit stereo music with its cover (audio, 754 KB)</a></dd>
+    <!-- source: NOAA's High-Resolution Rapid Refresh (HRRR), the 2026-10-29 00z run's 6-hour forecast of surface fields over the contiguous United States (hrrr.20261029/conus/hrrr.t00z.wrfsfcf06.grib2, a 3 km Lambert conformal grid), from NOAA's Open Data Dissemination bucket, which serves it with CORS and its index (.idx) beside it; a run's files do not change. Public domain (NOAA). -->
+    <!-- source: NOAA's Global Forecast System (GFS), the 2026-10-29 00z run's 6-hour forecast on the 0.25° latitude/longitude grid (gfs.20261029/00/atmos/gfs.t00z.pgrb2.0p25.f006), from the same program's bucket, with CORS and its .idx index. Public domain (NOAA). -->
+    <dt><span class="fmt" style="--fmt: #0f6f8f">GRIB</span> <a class="spec" href="https://github.com/d-v-b/refkv/blob/main/spec/zarrify/grib.md" title="how refkv zarrifies GRIB">spec</a></dt>
+    <dd><a href="#" id="example-grib-hrrr" data-url="https://noaa-hrrr-bdp-pds.s3.amazonaws.com/hrrr.20261029/conus/hrrr.t00z.wrfsfcf06.grib2">NOAA HRRR, a 6-hour forecast of the contiguous United States at 3 km (GRIB2, 154 MB)</a>
+      <a href="#" id="example-grib-gfs" data-url="https://noaa-gfs-bdp-pds.s3.amazonaws.com/gfs.20261029/00/atmos/gfs.t00z.pgrb2.0p25.f006">NOAA GFS, a 6-hour global forecast at 0.25° (GRIB2, 528 MB)</a></dd>
+    <!-- source: DANDI 000728 version 0.240827.1809 (CC BY 4.0, doi:10.48324/dandi.000728/0.240827.1809), the Allen Institute's "Visual Coding - Optical Physiology" (Allen Brain Observatory): mouse 491604967's session 501343881, stimulus set C (sub-491604967/sub-491604967_ses-501343881-StimC_behavior+image+ophys.nwb), an NWB file of 9125 objects, of which the page shows those Neuroglancer decodes, first the two-photon imaging plane's maximum intensity projection (its traces and stimulus movies are deflated, numcodecs.zlib, which the Neuroglancer fork does not decode); served by DANDI's S3 bucket with CORS; its blob URL names its content, so it does not change. -->
+    <dt><span class="fmt" style="--fmt: #2f5d8a">HDF5</span> <a class="spec" href="https://github.com/d-v-b/refkv/blob/main/spec/zarrify/hdf5.md" title="how refkv zarrifies HDF5">spec</a></dt>
+    <dd><a href="#" id="example-hdf5" data-url="https://dandiarchive.s3.amazonaws.com/blobs/0a5/f64/0a5f6405-d361-4d9e-8fde-8ca00be0f3b4">DANDI 000728, Allen Brain Observatory two-photon imaging of mouse visual cortex (NWB, 183 MB)</a></dd>
+    <!-- source: BioImage Archive S-BIAD1759 (CC BY 4.0). -->
+    <dt><span class="fmt" style="--fmt: #8a5300">IMS</span> <a class="spec" href="https://github.com/d-v-b/refkv/blob/main/spec/zarrify/ims.md" title="how refkv zarrifies IMS">spec</a></dt>
+    <dd><a href="#" id="example-ims" data-url="https://ftp.ebi.ac.uk/biostudies/fire/S-BIAD/759/S-BIAD1759/Files/BEHAV3D_Tumor_Profiler/DMG/2430F12/2430F12_pos1_CL1_1.ims">S-BIAD1759, 4-channel intravital time-lapse (Imaris, 163 MB)</a></dd>
+    <!-- source: Zenodo 6606445 (CC BY 4.0, doi:10.5281/zenodo.6606445), "Leica lif-file which does not open well with bioformats" by Peter Zentis: a LAS X project of z-stacks and a tile scan with its merged image. Zenodo can be slow to serve range requests. -->
+    <dt><span class="fmt" style="--fmt: #6a3d8f">LIF</span> <a class="spec" href="https://github.com/d-v-b/refkv/blob/main/spec/zarrify/lif.md" title="how refkv zarrifies LIF">spec</a></dt>
+    <dd><a href="#" id="example-lif" data-url="https://zenodo.org/api/records/6606445/files/Project007.lif/content">Zenodo 6606445, a Leica LAS X project of z-stacks and a tile scan (112 MB)</a></dd>
+    <!-- source: LibriVox (public domain), chapter 20 of "Public Opinion" by Walter Lippmann, read for LibriVox: MPEG-2 mono at 22.05 kHz, 64 kbps, on the Internet Archive, which redirects the download to a mirror that serves it with CORS. -->
+    <dt><span class="fmt" style="--fmt: #7c3a6b">MP3</span> <a class="spec" href="https://github.com/d-v-b/refkv/blob/main/spec/zarrify/mp3.md" title="how refkv zarrifies MP3">spec</a></dt>
+    <dd><a href="#" id="example-mp3" data-url="https://archive.org/download/public_opinion_1312_librivox/publicopinion_20_lippmann_64kb.mp3">LibriVox, Walter Lippmann's "Public Opinion", chapter 20 (audio, 3.9 MB)</a></dd>
+    <!-- source: DANDI 001195 version 0.250408.1733 (CC BY 4.0, doi:10.48324/dandi.001195/0.250408.1733), "Separable Dorsal Raphe Dopamine Projections Mediate the Facets of Loneliness-like State" (Keyes, Lee, Wichmann, Matthews and Tye, 2025): the behavior video of subject C370's session "24hr isolated, Stim OFF" (sub-C370/sub-C370_ses-20230312T162000_image+ophys/9967e37f-3fdd-4c30-b689-4eeccfe108f6_external_file_0.mp4), served by DANDI's S3 bucket with CORS; its blob URL names its content, so it does not change. -->
+    <!-- source: DANDI 001538 version 0.260527.1302 (CC BY 4.0, doi:10.48324/dandi.001538/0.260527.1302), "State-dependent modulation of spiny projection neurons controls levodopa-induced dyskinesia in a mouse model of Parkinson's disease" (Zhai, Cui, Wokosin, Tkatch, Crittenden, Graybiel and Surmeier, 2026): the behavior video of CDGI knockout mouse 07272018, hemiparkinsonian from a 6-OHDA lesion, 80 minutes after L-DOPA, for contralateral rotation (sub-CDGI-mouse-07272018/sub-CDGI-mouse-07272018_ses-pan++ON++none++CDGIKO++20180718_image/8275f9c1-f3d4-4c98-b9ea-0c4ff5e3b133_external_file_0.mov). A QuickTime file from Apple's encoder, whose version 0 ctts box has negative offsets; served by DANDI's S3 bucket with CORS, its blob URL naming its content. -->
+    <dt><span class="fmt" style="--fmt: #8c2f39">MP4</span> <a class="spec" href="https://github.com/d-v-b/refkv/blob/main/spec/zarrify/mp4.md" title="how refkv zarrifies MP4">spec</a></dt>
+    <dd><a href="#" id="example-mp4" data-url="https://dandiarchive.s3.amazonaws.com/blobs/151/10e/15110e7e-60b5-4a1a-8583-695eedb16c0e">DANDI 001195, a mouse after 24 hours alone, from a study of loneliness, 24020 pictures of H.264 (148 MB)</a>
+      <a href="#" id="example-mov" data-url="https://dandiarchive.s3.amazonaws.com/blobs/7af/b9b/7afb9b42-6f3f-46d4-b136-4418514c366e">DANDI 001538, a parkinsonian mouse 80 minutes after L-DOPA, from a study of dyskinesia (QuickTime .mov, 1635 pictures of H.264, 23 MB)</a></dd>
+    <!-- source: mrcfile's test data (BSD-3-Clause), https://github.com/ccpem/mrcfile: an EPU micrograph with an FEI2 extended header, and EMDB entry EMD-3197 (CC0). -->
+    <dt><span class="fmt" style="--fmt: #7b5e2a">MRC</span> <a class="spec" href="https://github.com/d-v-b/refkv/blob/main/spec/zarrify/mrc.md" title="how refkv zarrifies MRC">spec</a></dt>
+    <dd><a href="#" id="example-mrc" data-url="https://raw.githubusercontent.com/ccpem/mrcfile/64b0fb9ce0d921b902a06fe94d43e8d642b33d7d/tests/test_data/epu2.9_example.mrc">EPU cryo-EM micrograph, 4096 × 4096 (34 MB)</a>
+      <a href="#" id="example-mrc-map" data-url="https://raw.githubusercontent.com/ccpem/mrcfile/64b0fb9ce0d921b902a06fe94d43e8d642b33d7d/tests/test_data/EMD-3197.map">EMDB EMD-3197, 20 × 20 × 20 density map (33 KB)</a></dd>
+    <!-- source: OpenOrganelle aic_desmosome-3, the 640 nm light microscopy channel (Janelia COSEM, CC BY 4.0 per the AWS Open Data registry entry for janelia-cosem-datasets). Its FIB-SEM volumes are not used because each lists more than the store limit of 100000 objects. -->
+    <dt><span class="fmt" style="--fmt: #5c6a12">N5</span> <a class="spec" href="https://github.com/d-v-b/refkv/blob/main/spec/zarrify/n5.md" title="how refkv zarrifies N5">spec</a></dt>
+    <dd><a href="#" id="example-n5" data-url="https://janelia-cosem-datasets.s3.amazonaws.com/aic_desmosome-3/aic_desmosome-3.n5/lm/lm_640/">OpenOrganelle aic_desmosome-3, light microscopy multiscale, 640 nm channel (570 MB)</a></dd>
+    <!-- source: BioImage Archive S-BIAD3015 and S-BIAD2077 (EMBL-EBI BioImage Archive). -->
+    <dt><span class="fmt" style="--fmt: #b0422c">ND2</span> <a class="spec" href="https://github.com/d-v-b/refkv/blob/main/spec/zarrify/nd2.md" title="how refkv zarrifies ND2">spec</a></dt>
+    <dd><a href="#" id="example-nd2" data-url="https://ftp.ebi.ac.uk/biostudies/fire/S-BIAD/015/S-BIAD3015/Files/1-SR_1_9_6hPre-C_MC1.nd2">S-BIAD3015, E. coli time-lapse (Nikon, 4.6 GB)</a>
+      <a href="#" id="example-nd2-zstack" data-url="https://ftp.ebi.ac.uk/biostudies/fire/S-BIAD/077/S-BIAD2077/Files/373_230614_A1_Blk_Reg2_40x.nd2">S-BIAD2077, 5-channel z-stack (Nikon, 263 MB)</a></dd>
+    <!-- source: QuPath's Ki67 lymphoma tutorial slide (Zenodo 18302140, CC BY 4.0). Zenodo can be slow to serve range requests. -->
+    <dt><span class="fmt" style="--fmt: #7a4aa0">NDPI</span> <a class="spec" href="https://github.com/d-v-b/refkv/blob/main/spec/zarrify/ndpi.md" title="how refkv zarrifies NDPI">spec</a></dt>
+    <dd><a href="#" id="example-ndpi" data-url="https://zenodo.org/api/records/18302140/files/ki67_lymphoma.ndpi/content">QuPath Ki67 lymphoma (Hamamatsu, 221 MB)</a></dd>
+    <!-- source: dcm_qa_philips by Chris Rorden (BSD-2-Clause), https://github.com/neurolabusc/dcm_qa_philips. -->
+    <dt><span class="fmt" style="--fmt: #4553b0">NIfTI</span> <a class="spec" href="https://github.com/d-v-b/refkv/blob/main/spec/zarrify/nifti.md" title="how refkv zarrifies NIfTI">spec</a></dt>
+    <dd><a href="#" id="example-nifti" data-url="https://raw.githubusercontent.com/neurolabusc/dcm_qa_philips/74efdbc01eb62540fbb702787c3a7a2c0e22f9eb/Ref/DT_HIGH_32DIR_SENSE_1201.nii">dcm_qa_philips, 33-volume diffusion MRI (65 MB)</a></dd>
+    <!-- source: Zenodo 7768142 (MIT, doi:10.5281/zenodo.7768142), the BioImage Model Zoo's "3D UNet Arabidopsis Apical Stem Cells" by Lorenzo Cerrone and Adrian Wolny: its test input, a float32 confocal stack of an Arabidopsis thaliana shoot apical meristem's cell membranes, shape (1, 1, 100, 128, 128). -->
+    <dt><span class="fmt" style="--fmt: #1f5f8b">NumPy</span> <a class="spec" href="https://github.com/d-v-b/refkv/blob/main/spec/zarrify/npy.md" title="how refkv zarrifies NumPy">spec</a></dt>
+    <dd><a href="#" id="example-npy" data-url="https://zenodo.org/api/records/7768142/files/test_input.npy/content">Zenodo 7768142, a confocal stack of Arabidopsis stem cell membranes (.npy, 6.5 MB)</a></dd>
+    <!-- source: pynrrd's test data (MIT), https://github.com/mhe/pynrrd: a 30 × 30 × 30 binary ball, gzip-encoded, and its raw data behind a detached header. -->
+    <dt><span class="fmt" style="--fmt: #4a6f8a">NRRD</span> <a class="spec" href="https://github.com/d-v-b/refkv/blob/main/spec/zarrify/nrrd.md" title="how refkv zarrifies NRRD">spec</a></dt>
+    <dd><a href="#" id="example-nrrd" data-url="https://raw.githubusercontent.com/mhe/pynrrd/96bf87b78bde03987c09346ceffe0bb85a8f4214/nrrd/tests/data/BallBinary30x30x30_gz.nrrd">pynrrd ball, 30 × 30 × 30 int16, gzip (1.5 KB)</a>
+      <a href="#" id="example-nrrd-detached" data-url="https://raw.githubusercontent.com/mhe/pynrrd/96bf87b78bde03987c09346ceffe0bb85a8f4214/nrrd/tests/data/BallBinary30x30x30.nhdr">the same ball's detached header and raw data file (54 KB)</a></dd>
+    <!-- source: IDR idr0047 (CC BY 4.0). -->
+    <dt><span class="fmt" style="--fmt: #00566b">OME-Zarr</span> <a class="spec" href="https://github.com/d-v-b/refkv/blob/main/spec/zarrify/ome-zarr.md" title="how refkv zarrifies OME-Zarr">spec</a></dt>
+    <dd><a href="#" id="example-ome-zarr" data-url="https://uk1s3.embassy.ebi.ac.uk/idr/zarr/v0.4/idr0047A/4496763.zarr/">IDR idr0047, yeast smFISH z-stack with labels (OME-Zarr 0.4, 740 MB)</a></dd>
+    <!-- source: Zenodo 16569043 (CDLA-Sharing-1.0, doi:10.5281/zenodo.16569043), a Vectra Polaris fluorescence slide shared to report a QuPath rendering issue: 3 channels, 71472 x 61440 pixels, 9 levels of JPEG tiles. Akoya's own samples, on downloads.openmicroscopy.org, are not served with CORS. -->
+    <dt><span class="fmt" style="--fmt: #9a3412">QPTIFF</span> <a class="spec" href="https://github.com/d-v-b/refkv/blob/main/spec/zarrify/qptiff.md" title="how refkv zarrifies QPTIFF">spec</a></dt>
+    <dd><a href="#" id="example-qptiff" data-url="https://zenodo.org/api/records/16569043/files/2025-07-15_13_13_34.qptiff/content">Zenodo 16569043, a Vectra Polaris fluorescence slide, 3 channels in JPEG tiles (362 MB)</a></dd>
+    <!-- source: Sentinel-2 L2A tile T32UPU of 2019-05-24, from Mendeley Data doi:10.17632/ckcxh6jskz.1 by Lukas Graf (CC BY 4.0); contains modified Copernicus Sentinel data 2019. The URL is Mendeley's own S3 object, which may not stay stable. -->
+    <dt><span class="fmt" style="--fmt: #4f5b66">SAFE</span> <a class="spec" href="https://github.com/d-v-b/refkv/blob/main/spec/zarrify/safe.md" title="how refkv zarrifies SAFE">spec</a></dt>
+    <dd><a href="#" id="example-safe" data-url="https://prod-dcd-datasets-public-files-eu-west-1.s3.eu-west-1.amazonaws.com/4ee3c7fe-7ed9-489f-98d7-708ba7f426f9">Sentinel-2 L2A T32UPU, 2019-05-24 (zip, 945 MB)</a></dd>
+    <!-- source: GPT-2's weights (openai-community/gpt2, MIT) on the Hugging Face Hub, model.safetensors at commit 607a30d7: 160 float32 tensors, 548 MB; a `resolve` URL redirects, with CORS, to a CDN that serves ranges. -->
+    <dt><span class="fmt" style="--fmt: #b45309">safetensors</span> <a class="spec" href="https://github.com/d-v-b/refkv/blob/main/spec/zarrify/safetensors.md" title="how refkv zarrifies safetensors">spec</a></dt>
+    <dd><a href="#" id="example-safetensors" data-url="https://huggingface.co/openai-community/gpt2/resolve/607a30d783dfa663caf39e06633721c8d4cfcd7e/model.safetensors">GPT-2's weights on the Hugging Face Hub, 160 tensors (safetensors, 548 MB)</a></dd>
+    <!-- source: IDR idr0096 (CC BY 4.0); TCGA-CM-4752 (Zenodo 7189465, CC BY 4.0). Zenodo can be slow to serve range requests. -->
+    <dt><span class="fmt" style="--fmt: #2b6a9e">TIFF</span> <a class="spec" href="https://github.com/d-v-b/refkv/blob/main/spec/zarrify/tiff.md" title="how refkv zarrifies TIFF">spec</a></dt>
+    <dd><a href="#" id="example" data-url="https://ftp.ebi.ac.uk/pub/databases/IDR/idr0096-tratwal-marrowquant/20210609-ftp-ome-tiffs/4000_d11_m5_LT_2%20(20x_01).ome.tiff">IDR idr0096, mouse bone marrow (OME-TIFF, JPEG 2000, 487 MB)</a>
+      <a href="#" id="example-svs" data-url="https://zenodo.org/api/records/7189465/files/TCGA-CM-4752.svs/content">TCGA colon H&amp;E (Aperio SVS, JPEG 2000, 538 MB)</a></dd>
+    <!-- source: BioImage Archive S-BIAD1129 (CC BY 4.0, doi:10.6019/S-BIAD1129), "Artificial intelligence-based quantification of lymphocytes in feline small intestinal biopsies" (Magnusson Wulcan and Keller, 2024): test slide q1ip, a small intestine with T cell lymphoma, as its .vsi file and the _q1ip_ directory of tile files beside it, served by EMBL-EBI's FTP over HTTPS with CORS. OME's CellSens samples, on downloads.openmicroscopy.org, are not served with CORS. -->
+    <dt><span class="fmt" style="--fmt: #3f6b2a">VSI</span> <a class="spec" href="https://github.com/d-v-b/refkv/blob/main/spec/zarrify/vsi.md" title="how refkv zarrifies VSI">spec</a></dt>
+    <dd><a href="#" id="example-vsi" data-url="https://ftp.ebi.ac.uk/biostudies/fire/S-BIAD/129/S-BIAD1129/Files/AI_FeBx/test_wsis/q1ip.vsi">BioImage Archive S-BIAD1129, a feline intestinal biopsy, H&amp;E, 40× in JPEG tiles, the overview in lossless JPEG (Olympus VSI, 1.7 GB)</a></dd>
+    <!-- source: OpenOrganelle jrc_hela-2 (Janelia COSEM, CC BY 4.0). -->
+    <dt><span class="fmt" style="--fmt: #006d77">Zarr v2</span> <a class="spec" href="https://github.com/d-v-b/refkv/blob/main/spec/zarrify/zarr2.md" title="how refkv zarrifies Zarr v2">spec</a></dt>
+    <dd><a href="#" id="example-zarr2" data-url="https://janelia-cosem-datasets.s3.amazonaws.com/jrc_hela-2/jrc_hela-2.zarr/recon-1/em/fibsem-uint8/s4/">OpenOrganelle jrc_hela-2, FIB-SEM array (16 MB)</a></dd>
+  </dl>
+  <h2 class="part">How it works</h2>
+  <p class="about">Zeiss CZI, DICOM, FITS, FLAC (Free Lossless Audio Codec), WMO FM 92 GRIB edition 2 (WMO-No. 306, Manual on Codes, Volume I.2), HDF5, NWB, Imaris IMS, Leica LIF, MP3 (MPEG Layer III audio), MP4 and QuickTime (H.264 and HEVC video, AAC and MP3 audio), MRC2014, Nikon ND2, Hamamatsu NDPI, NIfTI-1 and NIfTI-2, NumPy NPY and NPZ (NEP 1), NRRD (Teem), Akoya QPTIFF, TIFF, OME-TIFF, Aperio SVS and Olympus VSI files, N5, OME-Zarr 0.4 and Zarr v2 stores, and Sentinel-2 SAFE (Level-1C, Level-2A) and safetensors (Hugging Face) products are supported;
+    the format is detected from the file's first bytes, or the store's metadata. A service worker reads
+    the input's structure with a few range requests, writes a phkv store in memory (by
+    <a href="https://github.com/d-v-b/refkv/blob/main/spec/zarrify.md">spec/zarrify.md</a>), keeps it
+    in the browser's cache, and serves it as plain Zarr at a local URL that any Zarr viewer on this site
+    can open. Pixel data is read from the original only when a viewer asks for it. That link works only here. A phkv store is one file, indexed by a perfect hash, so a reader finds a key in one hop, however many keys it has; this page can open one you host (a .phkv URL).</p>
+  <footer>Part of <a href="https://github.com/d-v-b/refkv">refkv</a>, reference semantics for key-value storage: specification, implementations and the source of this demo.
+    The Python script is highlighted by <a href="https://highlightjs.org/">highlight.js</a> (BSD-3-Clause).
+    Viewers: a fork of <a href="https://github.com/google/neuroglancer">Neuroglancer</a> (Apache-2.0) with
+    more Zarr codecs, and <a href="https://openlayers.org/">OpenLayers</a> (BSD-2-Clause); the page samples
+    contrast with the fork's JPEG 2000 (hayro-jpeg2000, Apache-2.0 OR MIT) and JPEG XR (jxrlib, BSD-2-Clause) decoders.
+    The examples' data are their authors' (see each source):
+    CZI: IDR (CC BY 4.0) and the BioImage Archive (CC0); DICOM: the NCI Imaging Data Commons and TCIA, under CC BY 4.0; FITS: astropy's test data under BSD-3-Clause; FLAC: the IETF CELLAR FLAC test files under CC0; GRIB: NOAA's HRRR and GFS forecasts, public domain; HDF5: DANDI 000728 (Allen Institute, 2024) under CC BY 4.0; IMS: a BioImage Archive record under CC BY 4.0; LIF: Zenodo 6606445 (Peter Zentis) under CC BY 4.0; MP3: LibriVox (public domain); MP4: DANDI 001195 (Keyes, Lee, Wichmann, Matthews and Tye, 2025) and DANDI 001538 (Zhai et al., 2026) under CC BY 4.0; MRC: mrcfile's test data under BSD-3-Clause, with EMD-3197 from the EMDB (CC0); N5: OpenOrganelle under CC BY 4.0; ND2: BioImage Archive records; NDPI: a Zenodo record under CC BY 4.0; NIfTI: dcm_qa_philips under BSD-2-Clause; NumPy: Zenodo 7768142 (Lorenzo Cerrone and Adrian Wolny) under MIT; NRRD: pynrrd's test data under MIT; OME-Zarr: IDR under CC BY 4.0; QPTIFF: Zenodo 16569043 under CDLA-Sharing-1.0; Sentinel-2 SAFE: Mendeley Data (doi:10.17632/ckcxh6jskz.1, CC BY 4.0), containing modified Copernicus Sentinel data 2019; safetensors: GPT-2 (OpenAI, openai-community/gpt2 on the Hugging Face Hub) under MIT; TIFF: IDR and Zenodo records under CC BY 4.0; VSI: BioImage Archive S-BIAD1129 (Magnusson Wulcan and Keller, 2024) under CC BY 4.0; Zarr v2: OpenOrganelle under CC BY 4.0.</footer>
+</main>
+<script type="module" src="demo.js"></script>
+</body>
+</html>
