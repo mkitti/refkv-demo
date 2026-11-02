@@ -4045,7 +4045,7 @@ function stem(url2) {
   }
   return last.replace(/\.(vzip|zarr|n5|zip|safe)$/i, "").replace(/\.[^.]*$/, "").replace(/[^\w.-]+/g, "_") || "input";
 }
-function pythonScript(url2, isArchive, profile, release) {
+function pythonScript(url2, isArchive, profile, release, format = "vzip") {
   const extra = MEDIA.includes(profile ?? "") ? "media" : "images";
   const requirement = `refkv[${extra}]${release ? `>=${release}` : ""}`;
   const name = stem(url2);
@@ -4077,7 +4077,13 @@ function pythonScript(url2, isArchive, profile, release) {
     `reference = zarrify(${JSON.stringify(url2)})`,
     "store = refkv.zarr.store(reference)  # a read-only zarr store"
   ];
-  const save = isArchive ? [] : [
+  const save = isArchive ? [] : format === "phkv" ? [
+    "",
+    "# This page downloads a phkv store of the hierarchy. This script does not write one:",
+    "# refkv's Python package has no phkv writer or reader yet, only vzip archives, which",
+    "# it saves and reopens with refkv.zarr.open(url).",
+    `# reference.save(${JSON.stringify(`${name}.vzip`)})`
+  ] : [
     "",
     "# The vzip archive this page downloads: the hierarchy, in one file that refers to the",
     "# input's bytes. Host it, and refkv.zarr.open(url) reads it anywhere.",
@@ -4520,7 +4526,7 @@ function mediaProfile(url2) {
   return ext === "mp3" ? "mp3" : ext === "flac" ? "flac" : ext && ["mp4", "mov", "m4a", "m4v"].includes(ext) ? "mp4" : void 0;
 }
 function showPython(input2, profile) {
-  const script = pythonScript(input2.url, input2.isArchive, profile, "0.2.0");
+  const script = pythonScript(input2.url, input2.isArchive, profile, "0.2.0", "phkv");
   const file = `${input2.isArchive ? "open" : "zarrify"}_${stem(input2.url)}.py`;
   $("python-code").innerHTML = core_default.highlight(script, { language: "python" }).value;
   $("python-run").textContent = `uv run ${file}`;

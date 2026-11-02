@@ -4117,7 +4117,7 @@
 
   // src/sw.ts
   var CACHE_PREFIX = true ? "refkv-phkv-archives-" : "refkv-archives-";
-  var CACHE = CACHE_PREFIX + "614263703e93d3b1ede636b8fe4ae39715604a09";
+  var CACHE = CACHE_PREFIX + "6f7f3a2b49e4197d75b877223153773c41b632c4";
   var MAX_ARCHIVES = 16;
   var MAX_BYTES = 2 ** 30;
   var savedUrl = (name) => new URL(`refkv-archives/${encodeId(name)}`, self.registration.scope).href;
